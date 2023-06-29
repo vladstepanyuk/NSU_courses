@@ -452,8 +452,6 @@ translations/*.qm
 *.svg
 *.svgz
 
-# Portable Document Format
-*.pdf
 
 # X BitMap
 *.xbm
