@@ -1,1 +1,0 @@
-/usr/bin/c++     CMakeFiles/3a.dir/main.cpp.o CMakeFiles/3a.dir/FileUtils.cpp.o CMakeFiles/3a.dir/StringUtils.cpp.o  -o 3a 

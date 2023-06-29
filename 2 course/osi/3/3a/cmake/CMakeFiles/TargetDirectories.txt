@@ -1,3 +1,0 @@
-/home/russian/Osi/3/3a/cmake/CMakeFiles/rebuild_cache.dir
-/home/russian/Osi/3/3a/cmake/CMakeFiles/edit_cache.dir
-/home/russian/Osi/3/3a/cmake/CMakeFiles/3a.dir
