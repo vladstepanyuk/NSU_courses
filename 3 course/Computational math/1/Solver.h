@@ -23,7 +23,7 @@ namespace comp_math {
         bool is_zero_weak(double x) const;
     public:
 
-        Solver(double epsilon, double delta,  int n = 10000, double zero = 1e-8);
+        Solver(double epsilon, double delta,  int n = 100000, double zero = 1e-8);
 
         std::vector<double> solve_cube_equation(double a, double b, double c);
 

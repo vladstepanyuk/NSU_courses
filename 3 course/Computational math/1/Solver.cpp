@@ -126,9 +126,9 @@ std::vector<double> comp_math::Solver::solve_cube_equation(double a, double b, d
     else if (function(x1) < -epsilon && function(x2) < -epsilon)
         return {solve_monotonic_function_on_endless_segment(function, x2, 1)};
     else if (function(x1) > epsilon && is_zero_weak(function(x2)))
-        return {x2, solve_monotonic_function_on_endless_segment(function, a, -1)};
+        return {x2, solve_monotonic_function_on_endless_segment(function, x1, -1)};
     else if (is_zero_weak(function(x1)) && function(x2) < -epsilon)
-        return {a, solve_monotonic_function_on_endless_segment(function, x2, 1)};
+        return {x1, solve_monotonic_function_on_endless_segment(function, x2, 1)};
     else if (function(x1) > epsilon && function(x2) < -epsilon)
         return {solve_monotonic_function_on_endless_segment(function, x1, -1),
                 solve_monotonic_function_on_final_segment(function, x1, x2),
