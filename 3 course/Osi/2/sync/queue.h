@@ -7,6 +7,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <semaphore.h>
 #include <unistd.h>
 
 typedef struct _QueueNode {
@@ -19,11 +20,18 @@ typedef struct _Queue {
 	qnode_t *last;
 
 	pthread_t qmonitor_tid;
+	pthread_spinlock_t spinlock;
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
+	sem_t sem;
 
 	int count;
 	int max_count;
 
 	// queue statistics
+
+	double get_avg_time;
+	double add_avg_time;
 	long add_attempts;
 	long get_attempts;
 	long add_count;

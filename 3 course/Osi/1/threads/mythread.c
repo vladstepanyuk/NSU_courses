@@ -26,10 +26,13 @@ void *create_stack(off_t size, int thread_num) {
   ftruncate(stack_fd, size);
 
   stack = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, stack_fd, 0);
-  if (mmap == MAP_FAILED)
+  if (stack == MAP_FAILED)
     return NULL;
 
   close(stack_fd);
+  if (remove(stack_file))
+    return NULL;
+
   memset(stack, 0, size);
   return stack;
 }
@@ -40,9 +43,13 @@ int mythread_wrap_function(void *args) {
   void *result = mythread->func(mythread->arg);
 
   if (mythread->is_detached) {
+    int id = mythread->id;
     mythread->is_ended = true;
+
     free(mythread);
     return 0;
+//    _exit(0);
+    exit(0);
   }
 
   mythread->result = result;
@@ -68,8 +75,10 @@ int mythread_create(mythread_t *tid, start_routine_t func, void *arg,
   mythread->is_ended = false;
   mythread->is_joined = false;
   void *stack = create_stack(STACK_SIZE, thread_num);
+  mythread->stack = stack;
 
   if (stack == NULL) {
+    free(mythread);
     return -1;
   }
 
@@ -79,6 +88,7 @@ int mythread_create(mythread_t *tid, start_routine_t func, void *arg,
             mythread);
 
   if (child_pid == -1) {
+    free(mythread);
     return -1;
   }
   *tid = mythread;
@@ -87,6 +97,9 @@ int mythread_create(mythread_t *tid, start_routine_t func, void *arg,
 
 int mythread_join(mythread_t tid, void **result) {
   mythread_struct_t *mythread = (mythread_struct_t *)tid;
+  if (mythread->is_detached) {
+    return -1;
+  }
   while (!mythread->is_ended) {
     sleep(1);
   }
@@ -94,6 +107,11 @@ int mythread_join(mythread_t tid, void **result) {
   *result = mythread->result;
 
   mythread->is_joined = true;
+  char stack_file[100];
+  snprintf(stack_file, 100, "./stack-%d", mythread->id);
+
+  if (remove(stack_file))
+    return -1;
   free(mythread);
   return 0;
 }

@@ -7,6 +7,7 @@ typedef struct mythread {
   start_routine_t func;
   void *arg;
   void *result;
+  void *stack;
   int id;
   bool is_ended;
   bool is_joined;

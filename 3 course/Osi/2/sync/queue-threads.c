@@ -37,7 +37,7 @@ void *reader(void *arg) {
 	queue_t *q = (queue_t *)arg;
 	printf("reader [%d %d %d]\n", getpid(), getppid(), gettid());
 
-	set_cpu(1);
+	set_cpu(2);
 
 	while (1) {
 		int val = -1;
@@ -66,37 +66,48 @@ void *writer(void *arg) {
 		if (!ok)
 			continue;
 		i++;
+		// int val = rand() %2;
+		// if (val)
+		// {
+		// 	usleep(1)
+		// }
+		
+		// sched_yield();
+		// usleep(1);
 	}
 
 	return NULL;
 }
 
 int main() {
-	pthread_t tid;
+	pthread_t tid1, tid2;
 	queue_t *q;
 	int err;
 
 	printf("main [%d %d %d]\n", getpid(), getppid(), gettid());
 
-	q = queue_init(1000000);
+	q = queue_init(1000);
 
-	err = pthread_create(&tid, NULL, reader, q);
+	err = pthread_create(&tid1, NULL, reader, q);
 	if (err) {
 		printf("main: pthread_create() failed: %s\n", strerror(err));
 		return -1;
 	}
 
-	sched_yield();
+	// sched_yield();
 
-	err = pthread_create(&tid, NULL, writer, q);
+	err = pthread_create(&tid2, NULL, writer, q);
 	if (err) {
 		printf("main: pthread_create() failed: %s\n", strerror(err));
 		return -1;
 	}
 
-	// TODO: join threads
+	pthread_join(tid1, NULL);
+	pthread_join(tid2, NULL);
 
 	pthread_exit(NULL);
+
+	queue_destroy(q);
 
 	return 0;
 }
