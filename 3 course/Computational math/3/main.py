@@ -13,10 +13,10 @@ def calc_integral(f, a, b, k=10):
         float: The value of the definite integral.
     """
 
-    x = np.linspace(a, b, k)
+    x = np.linspace(a, b, k+1)
 
     integral = 0
-    for i in range(k - 1):
+    for i in range(k):
         integral += (x[i + 1] - x[i]) * (f(x[i]) + f(x[i + 1])) / 2
 
     return integral
