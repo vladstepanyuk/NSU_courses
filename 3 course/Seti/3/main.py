@@ -2,7 +2,6 @@ import asyncio
 import logging
 import sys
 import aiohttp
-from os import getenv
 from json import load
 
 from aiogram import Bot, Dispatcher, Router, types
@@ -17,7 +16,6 @@ from threading import Lock
 context = load(open("config.json"))
 TOKEN = context["token"]
 
-# All handlers should be attached to the Router (or Dispatcher)
 dp = Dispatcher()
 
 storage = {}
