@@ -23,7 +23,12 @@ typedef struct _Queue {
 	pthread_spinlock_t spinlock;
 	pthread_mutex_t mutex;
 	pthread_cond_t cond;
-	sem_t sem;
+	// sem_t sem;
+	sem_t is_not_full;
+	sem_t is_not_empty;
+	sem_t statistic_sem;
+
+
 
 	int count;
 	int max_count;

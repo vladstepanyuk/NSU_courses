@@ -1,8 +1,8 @@
 #define _GNU_SOURCE
+#include "queue.h"
 #include <assert.h>
 #include <pthread.h>
 #include <time.h>
-#include "queue.h"
 
 void *qmonitor(void *arg) {
   queue_t *q = (queue_t *)arg;
@@ -31,8 +31,10 @@ queue_t *queue_init(int max_count) {
 
   // pthread_spin_init(&q->spinlock, 0);
   pthread_mutex_init(&q->mutex, NULL);
-  // pthread_cond_init(&q->cond, NULL);
-  // sem_init(&q->sem, 0, 1);
+  pthread_cond_init(&q->cond, NULL);
+  // sem_init(&q->is_not_empty, 0, 0);
+  // sem_init(&q->is_not_full, 0, 1);
+  // sem_init(&q->statistic_sem, 0, 1);
 
   q->first = NULL;
   q->last = NULL;
@@ -54,15 +56,16 @@ queue_t *queue_init(int max_count) {
 void queue_destroy(queue_t *q) {
   pthread_cancel(q->qmonitor_tid);
 
-
-
   // printf("add avg time: %lf\n", q->add_avg_time / q->add_attempts);
   // printf("get avg time: %lf\n", q->get_avg_time / q->get_attempts);
 
   // pthread_spin_destroy(&q->spinlock);
   pthread_mutex_destroy(&q->mutex);
-  // pthread_cond_destroy(&q->cond);
-  // sem_destroy(&q->sem);
+  pthread_cond_destroy(&q->cond);
+  // sem_destroy(&q->is_not_empty);
+  // sem_destroy(&q->is_not_full);
+  // sem_destroy(&q->statistic_sem);
+  
 
   qnode_t *tmp = q->first;
 
@@ -79,15 +82,14 @@ void queue_destroy(queue_t *q) {
 int queue_add(queue_t *q, int val) {
   // pthread_spin_lock(&q->spinlock);
   pthread_mutex_lock(&q->mutex);
-  // sem_wait(&q->sem);
+  // sem_wait(&q->is_not_full);
+  // sem_wait(&q->statistic_sem);
+  while (q->count == q->max_count) {
+    pthread_cond_wait(&q->cond, &q->mutex);
+  }
 
-  // while (q->count == q->max_count) {
-  //   pthread_cond_wait(&q->cond, &q->mutex);
-  // }
-
-  struct timespec mt1, mt2; 
+  struct timespec mt1, mt2;
   clock_gettime(CLOCK_REALTIME, &mt1);
-
 
   q->add_attempts++;
 
@@ -95,15 +97,13 @@ int queue_add(queue_t *q, int val) {
 
   if (q->count == q->max_count) {
     clock_gettime(CLOCK_REALTIME, &mt2);
-    q->add_avg_time += 1000000000*(mt2.tv_sec - mt1.tv_sec)+(mt2.tv_nsec - mt1.tv_nsec);
-
+    q->add_avg_time +=
+        1000000000 * (mt2.tv_sec - mt1.tv_sec) + (mt2.tv_nsec - mt1.tv_nsec);
 
     // pthread_spin_unlock(&q->spinlock);
-    pthread_mutex_unlock(&q->mutex);
+    // pthread_mutex_unlock(&q->mutex);
     // pthread_cond_signal(&q->cond);
     // sem_post(&q->sem);
-
-
 
     return 0;
   }
@@ -124,33 +124,37 @@ int queue_add(queue_t *q, int val) {
     q->last = q->last->next;
   }
 
+
   q->count++;
   q->add_count++;
 
-
   clock_gettime(CLOCK_REALTIME, &mt2);
-  q->add_avg_time += 1000000000*(mt2.tv_sec - mt1.tv_sec)+(mt2.tv_nsec - mt1.tv_nsec);
-
+  q->add_avg_time +=
+      1000000000 * (mt2.tv_sec - mt1.tv_sec) + (mt2.tv_nsec - mt1.tv_nsec);
 
   // pthread_spin_unlock(&q->spinlock);
   pthread_mutex_unlock(&q->mutex);
-
-  // pthread_cond_signal(&q->cond);
+  pthread_cond_signal(&q->cond);
 
   // sem_post(&q->sem);
+
+  // sem_post(&q->statistic_sem);
+  // sem_post(&q->is_not_empty);
   return 1;
 }
 
 int queue_get(queue_t *q, int *val) {
   // pthread_spin_lock(&q->spinlock);
   pthread_mutex_lock(&q->mutex);
-  // sem_wait(&q->sem);
 
-  // while (q->count == 0) {
-  //   pthread_cond_wait(&q->cond, &q->mutex);
-  // }
+  // sem_wait(&q->is_not_empty);
+  // sem_wait(&q->statistic_sem);
 
-  struct timespec mt1, mt2; 
+  while (q->count == 0) {
+    pthread_cond_wait(&q->cond, &q->mutex);
+  }
+
+  struct timespec mt1, mt2;
   clock_gettime(CLOCK_REALTIME, &mt1);
 
   q->get_attempts++;
@@ -159,14 +163,14 @@ int queue_get(queue_t *q, int *val) {
 
   if (q->count == 0) {
     clock_gettime(CLOCK_REALTIME, &mt2);
-    q->get_avg_time += 1000000000*(mt2.tv_sec - mt1.tv_sec)+(mt2.tv_nsec - mt1.tv_nsec);
+    q->get_avg_time +=
+        1000000000 * (mt2.tv_sec - mt1.tv_sec) + (mt2.tv_nsec - mt1.tv_nsec);
 
     // pthread_spin_unlock(&q->spinlock);
-    pthread_mutex_unlock(&q->mutex);
+    // pthread_mutex_unlock(&q->mutex);
     // pthread_cond_signal(&q->cond);
 
     // sem_post(&q->sem);
-
 
     return 0;
   }
@@ -180,12 +184,16 @@ int queue_get(queue_t *q, int *val) {
   q->get_count++;
 
   clock_gettime(CLOCK_REALTIME, &mt2);
-  q->get_avg_time +=1000000000*(mt2.tv_sec - mt1.tv_sec)+(mt2.tv_nsec - mt1.tv_nsec);
+  q->get_avg_time +=
+      1000000000 * (mt2.tv_sec - mt1.tv_sec) + (mt2.tv_nsec - mt1.tv_nsec);
 
   // pthread_spin_unlock(&q->spinlock);
   pthread_mutex_unlock(&q->mutex);
-  // pthread_cond_signal(&q->cond);
+  pthread_cond_signal(&q->cond);
   // sem_post(&q->sem);
+
+  // sem_post(&q->statistic_sem);
+  // sem_post(&q->is_not_full);
 
   return 1;
 }
@@ -193,16 +201,17 @@ int queue_get(queue_t *q, int *val) {
 void queue_print_stats(queue_t *q) {
   // pthread_spin_lock(&q->spinlock);
   pthread_mutex_lock(&q->mutex);
-  // sem_wait(&q->sem);
+  // sem_wait(&q->statistic_sem);
+
   printf("queue stats: current size %d; attempts: (%ld %ld %ld); counts (%ld "
          "%ld %ld)\n",
          q->count, q->add_attempts, q->get_attempts,
          q->add_attempts - q->get_attempts, q->add_count, q->get_count,
          q->add_count - q->get_count);
-  printf("add avg time: %lf\n", q->add_avg_time /  q->add_attempts);
+  printf("add avg time: %lf\n", q->add_avg_time / q->add_attempts);
   printf("get avg time: %lf\n", q->get_avg_time / q->get_attempts);
 
+  // sem_post(&q->statistic_sem);
   // pthread_spin_unlock(&q->spinlock);
   pthread_mutex_unlock(&q->mutex);
-  // sem_post(&q->sem)
 }
