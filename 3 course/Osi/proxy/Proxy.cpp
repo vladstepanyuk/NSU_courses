@@ -327,7 +327,8 @@ void Proxy::process_client(int client_socket) {
         request_for_server += "\n";
       }
 
-      if (mask.all()) {
+
+      if (line == "\r" && mask[0] && mask[1] && mask[2]) {
         request_for_server += "\r\n";
         int err = process_request(host_name, client_socket, request_for_server);
 
@@ -338,14 +339,10 @@ void Proxy::process_client(int client_socket) {
           close(client_socket);
           return;
         }
-      }
-
-      if (line == "\r" && !mask.all()) {
+      } else if (line == "\r") {
         send(client_socket, error_message.c_str(), error_message.size(), MSG_CMSG_CLOEXEC);
         close(client_socket);
         return;
-      } else if (line == "\r") {
-        mask = 0;
       }
 
       line.clear();
