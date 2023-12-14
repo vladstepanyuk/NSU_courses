@@ -8,9 +8,17 @@
 #include <condition_variable>
 #include <shared_mutex>
 
+
+enum STATUS {
+  READY,
+  NOT_READY,
+  ERROR
+};
+
+
 struct cash_data {
   std::string data;
-  bool is_ready = false;
+  STATUS status = NOT_READY;
 
   std::shared_mutex mutex;
   std::condition_variable_any cv;

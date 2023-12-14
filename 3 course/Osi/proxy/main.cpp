@@ -1,14 +1,9 @@
 #include <iostream>
-#include <csignal>
 #include "Proxy.h"
 
 void start_proxy(Proxy &proxy) {
 	proxy.run();
 }
-
-
-
-
 
 
 int main() {
