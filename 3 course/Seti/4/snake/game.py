@@ -17,6 +17,35 @@ green = (0, 255, 0)
 state_delay_sec = 1
 
 
+class TurnFunc:
+    def __init__(self, func, *always_args):
+        self.mutex = threading.Lock()
+        self.func = func
+        self.always_args = always_args
+
+    def __call__(self, *args, **kwargs):
+        return self.func(*self.always_args, *args, **kwargs)
+
+    def set_func(self, func, *always_args):
+        with self.mutex:
+            self.func = func
+            self.always_args = always_args
+
+
+class Context:
+
+    def __init__(self, my_id, my_socket, field, clients, stop, turn_func, is_master):
+        self.mutex = threading.Lock()
+        self.my_id = my_id
+        self.my_socket = my_socket
+        self.field = field
+        self.clients = clients
+        self.stop = stop
+        self.turn_func = turn_func
+        self.is_master = is_master
+        self.send_thread = None
+
+
 class IdBuffer:
     def __init__(self):
         self.id = 0
@@ -31,12 +60,18 @@ class IdBuffer:
 id_buffer = IdBuffer()
 
 
-def disconnect_checker(my_id, my_socket, field, clients, stop):
-    while not stop.is_set():
-        # print(1)
+def first_match(iterable, predicate):
+    try:
+        return next(n for n in iterable if predicate(n))
+    except StopIteration:
+        return None
+
+
+def disconnect_checker(context):
+    while not context.stop.is_set():
         to_remove = []
-        for _, client_time in clients.items():
-            if client_time[0].id == my_id:
+        for _, client_time in context.clients.items():
+            if client_time[0].id == context.my_id:
                 continue
 
             client = client_time[0]
@@ -51,23 +86,67 @@ def disconnect_checker(my_id, my_socket, field, clients, stop):
                 send_msg.sender_id = 1
                 send_msg.receiver_id = client.id
 
-                my_socket.sendto(send_msg.SerializeToString(), (client.ip_address, client.port))
+                context.my_socket.sendto(send_msg.SerializeToString(), (client.ip_address, client.port))
 
-        with field.mutex:
+        is_master_deleted = False
+        is_deputy_deleted = False
+
+        # if context.my_id in context.clients:
+        #     print(context.clients[context.my_id][0].role)
+
+        with context.field.mutex:
             for i in to_remove:
-                if i in field.snakes:
-                    field.snakes.pop(i)
-                clients.pop(i)
+                # print(context.clients[i][0])
+                # print(context.clients[context.my_id][0])
+                if context.clients[i][0].role == snkpt.MASTER:
+                    is_master_deleted = True
+                elif context.clients[i][0].role == snkpt.DEPUTY:
+                    is_deputy_deleted = True
+                context.clients.pop(i)
+
+        with context.mutex:
+            if is_master_deleted and context.clients[context.my_id][0].role == snkpt.DEPUTY:
+                context.clients[context.my_id][0].role = snkpt.MASTER
+                context.turn_func = TurnFunc(lambda snake, direction: snake.turn(direction),
+                                             context.field.snakes[context.my_id])
+                context.is_master = True
+                send_state_thread = threading.Thread(target=send_state, args=(
+                    context.my_id, context.my_socket, context.field, context.clients, context.stop))
+                send_state_thread.start()
+                context.send_thread = send_state_thread
+
+                if len(context.clients) > 1:
+                    make_new_deputy(context.my_id, context.my_socket, context.clients)
+
+            elif is_master_deleted and context.clients[context.my_id][0].role == snkpt.NORMAL:
+                i = None
+                # print(1111111111)
+
+                for _, client_time in context.clients.items():
+                    if client_time[0].role == snkpt.DEPUTY or client_time[0].role == snkpt.MASTER:
+                        i = client_time[0]
+                        break
+                # print(i)
+                # print(context.clients)
+                if i is not None:
+                    context.turn_func = TurnFunc(sc.send_direction, context.my_socket,
+                                                 (i.ip_address, i.port),
+                                                 context.my_id)
+            elif context.is_master and is_deputy_deleted and len(context.clients) > 1:
+                make_new_deputy(context.my_id, context.my_socket, context.clients)
         time.sleep(0.5)
 
 
-def add_new_snake(my_id, my_socket, addr, field, clients):
-    new_id = field.add_snake(sc.SnakeOffline(0, 0, black))
+def add_new_snake(context, addr):
+    new_id = context.field.add_snake(sc.Snake(0, 0, black))
+    # send_msg = None
     send_msg = snkpt.GameMessage()
     send_msg.AckMsg()
-    send_msg.msg_seq = 0
-    send_msg.sender_id = 1
+    send_msg.msg_seq = id_buffer.get_id()
+    send_msg.sender_id = 0
     send_msg.receiver_id = new_id
+    print(send_msg)
+
     client = snkpt.GamePlayer()
     client.ip_address = addr[0]
     client.port = addr[1]
@@ -76,12 +155,12 @@ def add_new_snake(my_id, my_socket, addr, field, clients):
     client.role = snkpt.NORMAL
     client.score = 0
 
-    clients[new_id] = [client, time.monotonic()]
+    context.clients[new_id] = [client, time.monotonic()]
 
-    my_socket.sendto(send_msg.SerializeToString(), addr)
+    context.my_socket.sendto(send_msg.SerializeToString(), addr)
 
-    if len(clients) == 2:
-        make_new_deputy(new_id, my_socket, clients)
+    if len(context.clients) == 2:
+        make_new_deputy(context.my_id, context.my_socket, context.clients)
 
 
 def make_new_deputy(my_id, my_socket, clients):
@@ -99,26 +178,49 @@ def make_new_deputy(my_id, my_socket, clients):
             break
     if new_deputy is None:
         return
-    print(1)
+    new_deputy.role = snkpt.DEPUTY
+    print(send_msg)
     my_socket.sendto(send_msg.SerializeToString(), (new_deputy.ip_address, new_deputy.port))
 
 
-def socket_listener_server(my_id, my_socket, field, clients, executor, stop):
-    my_socket.settimeout(0.5)
+def socket_listener_server(context, executor):
+    context.my_socket.settimeout(0.5)
 
-    while not stop.is_set():
+    while not context.stop.is_set():
         try:
-            data, addr = my_socket.recvfrom(1024)
+            data, addr = context.my_socket.recvfrom(1024)
         except socket.timeout:
             continue
         game_msg = snkpt.GameMessage()
         game_msg.ParseFromString(data)
-        if game_msg.sender_id in clients:
-            clients[game_msg.sender_id][1] = time.monotonic()
+        if game_msg.sender_id in context.clients:
+            context.clients[game_msg.sender_id][1] = time.monotonic()
         if game_msg.join.IsInitialized():
-            executor.submit(add_new_snake, my_id, my_socket, addr, field, clients)
+            executor.submit(add_new_snake, context, addr)
         elif game_msg.steer.IsInitialized():
-            field.snakes[game_msg.sender_id].turn(game_msg.steer.direction)
+            context.field.snakes[game_msg.sender_id].turn(sc.directions_map_rev[game_msg.steer.direction])
+        elif game_msg.state.state.IsInitialized():
+            with context.field.mutex:
+                context.field.food = set()
+                for cord in game_msg.state.state.foods:
+                    context.field.food.add((cord.x, cord.y))
+                context.field.snakes.clear()
+                for snake_state in game_msg.state.state.snakes:
+                    context.field.snakes[snake_state.player_id] = sc.Snake(0, 0, black)
+                    context.field.snakes[snake_state.player_id].get_from_state(snake_state)
+                context.clients.clear()
+                with context.mutex:
+                    for client in game_msg.state.state.players.players:
+                        context.clients[client.id] = [client, time.monotonic()]
+        elif game_msg.ping.IsInitialized():
+            send_msg = snkpt.GameMessage()
+            send_msg.AckMsg()
+            send_msg.msg_seq = id_buffer.get_id()
+            send_msg.sender_id = context.my_id
+            context.my_socket.sendto(send_msg.SerializeToString(), addr)
+        elif (game_msg.role_change.IsInitialized() and game_msg.role_change.receiver_role == snkpt.DEPUTY
+              and game_msg.role_change.sender_role == snkpt.MASTER):
+            print("New deputy")
 
 
 def get_state(field, clients):
@@ -164,76 +266,73 @@ def send_state(my_id, my_socket, field, clients, stop):
         time.sleep(0.05)
 
 
-def socket_listener_client(my_socket, my_id, field, stop):
-    my_socket.settimeout(0.5)
-
-    while not stop.is_set():
-        try:
-            data, addr = my_socket.recvfrom(1024)
-        except socket.timeout:
-            continue
-        game_msg = snkpt.GameMessage()
-        game_msg.ParseFromString(data)
-        if game_msg.state.state.IsInitialized():
-            with field.mutex:
-                field.food = set()
-                for cord in game_msg.state.state.foods:
-                    field.food.add((cord.x, cord.y))
-                field.snakes.clear()
-                for snake_state in game_msg.state.state.snakes:
-                    field.snakes[snake_state.player_id] = sc.SnakeOffline(0, 0, black)
-                    field.snakes[snake_state.player_id].get_from_state(snake_state)
-        if game_msg.ping.IsInitialized():
-            send_msg = snkpt.GameMessage()
-            send_msg.AckMsg()
-            send_msg.msg_seq = 0
-            send_msg.receiver_id = 1
-            send_msg.sender_id = my_id
-            my_socket.sendto(send_msg.SerializeToString(), addr)
-        if (game_msg.role_change.IsInitialized() and game_msg.role_change.receiver_role == snkpt.DEPUTY
-                and game_msg.role_change.sender_role == snkpt.MASTER):
-            print("New deputy")
-
-
-
-def server_game(server_port):
+def server_game(is_master):
     my_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    my_socket.bind(("127.0.0.1", server_port))
+    my_socket.bind(("127.0.0.1", 0))
 
-    print(f"Server IP: {my_socket.getsockname()}")
+    print(f"ADDRESS: {my_socket.getsockname()}")
 
     field = sc.Field()
-
-    my_id = 0
-
-    me = snkpt.GamePlayer()
-    me.id = my_id
-    me.name = "admin"
-    me.ip_address = my_socket.getsockname()[0]
-    me.port = my_socket.getsockname()[1]
-    me.role = snkpt.MASTER
-    me.score = 0
-    me.type = snkpt.HUMAN
-
-    clients = {0: [me, -1]}
-
-    # message_pool = {}
-
     stop = threading.Event()
+
+    if is_master:
+        my_id = 0
+
+        me = snkpt.GamePlayer()
+        me.id = my_id
+        me.name = "admin"
+        me.ip_address = my_socket.getsockname()[0]
+        me.port = my_socket.getsockname()[1]
+        me.role = snkpt.MASTER
+        me.score = 0
+        me.type = snkpt.HUMAN
+
+        clients = {0: [me, -1]}
+    else:
+        ip_master = input("Enter ip of master: ")
+        port_master = int(input("Enter port of master: "))
+        addr = (ip_master, port_master)
+
+        join_msg = snkpt.GameMessage()
+        join_msg.msg_seq = 0
+        join_msg.JoinMsg()
+        join_msg.join.game_name = "Snake"
+        join_msg.join.player_name = "Pythonist"
+        join_msg.join.player_type = snkpt.HUMAN
+        join_msg.join.requested_role = snkpt.NORMAL
+        my_socket.sendto(join_msg.SerializeToString(), addr)
+
+        data, _ = my_socket.recvfrom(1024)
+
+        received_msg = snkpt.GameMessage()
+        received_msg.ParseFromString(data)
+        my_id = received_msg.receiver_id
+        print(received_msg)
+        clients = {}
+
+    if is_master:
+        snake = sc.Snake(0, 0, black)
+        field.add_snake(snake)
+        field.spawn_food()
+        turn_func = TurnFunc(lambda snake, direction: snake.turn(direction), snake)
+    else:
+        turn_func = TurnFunc(sc.send_direction, my_socket, addr, my_id)
 
     executor = ThreadPoolExecutor(max_workers=10)
 
+    context = Context(my_id, my_socket, field, clients, stop, turn_func, is_master)
+
     listening_thread = threading.Thread(target=socket_listener_server,
-                                        args=(my_id, my_socket, field, clients, executor, stop))
+                                        args=(context, executor))
     listening_thread.start()
-    send_state_thread = threading.Thread(target=send_state, args=(my_id, my_socket, field, clients, stop))
-    send_state_thread.start()
+
+    if is_master:
+        send_state_thread = threading.Thread(target=send_state, args=(my_id, my_socket, field, clients, stop))
+        send_state_thread.start()
 
     disconnect_checker_thread = threading.Thread(target=disconnect_checker,
-                                                 args=(my_id, my_socket, field, clients, stop))
+                                                 args=(context,))
     disconnect_checker_thread.start()
-
-    snake = sc.SnakeOffline(0, 0, black)
 
     x_pixels = field.x_pixels * field.pixel_size
     y_pixels = field.y_pixels * field.pixel_size
@@ -245,25 +344,22 @@ def server_game(server_port):
 
     clock = pygame.time.Clock()
 
-    field.add_snake(snake)
-
-    field.spawn_food()
-
     while not game_over:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 game_over = True
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_LEFT:
-                    snake.turn_left()
+                    context.turn_func((-1, 0))
                 elif event.key == pygame.K_RIGHT:
-                    snake.turn_right()
+                    context.turn_func((1, 0))
                 elif event.key == pygame.K_UP:
-                    snake.turn_up()
+                    context.turn_func((0, -1))
                 elif event.key == pygame.K_DOWN:
-                    snake.turn_down()
+                    context.turn_func((0, 1))
 
-        field.move()
+        if context.is_master:
+            field.move()
 
         dis.fill(white)
         draw_field(field, dis)
@@ -274,78 +370,13 @@ def server_game(server_port):
 
     stop.set()
     listening_thread.join()
-    send_state_thread.join()
+    if is_master:
+        send_state_thread.join()
+    elif context.is_master:
+        context.send_thread.join()
+
+    disconnect_checker_thread.join()
     executor.shutdown(wait=True)
     my_socket.close()
-    pygame.quit()
-    # quit()
-
-
-def client_game(server_ip, server_port):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("127.0.0.1", 0))
-
-    print(f"Client IP: {sock.getsockname()}")
-
-    addr = (server_ip, server_port)
-
-    field = sc.Field()
-
-    stop = threading.Event()
-
-    join_msg = snkpt.GameMessage()
-    join_msg.msg_seq = 0
-    join_msg.sender_id = 1
-    join_msg.receiver_id = 2
-    join_msg.JoinMsg()
-    join_msg.join.game_name = "Snake"
-    join_msg.join.player_name = "Pythonist"
-    join_msg.join.player_type = snkpt.HUMAN
-    join_msg.join.requested_role = snkpt.NORMAL
-    sock.sendto(join_msg.SerializeToString(), (server_ip, server_port))
-
-    data, _ = sock.recvfrom(1024)
-
-    received_msg = snkpt.GameMessage()
-    received_msg.ParseFromString(data)
-    my_id = received_msg.receiver_id
-
-    reciever_thread = threading.Thread(target=socket_listener_client, args=(sock, my_id, field, stop))
-    reciever_thread.start()
-
-    x_pixels = field.x_pixels * field.pixel_size
-    y_pixels = field.y_pixels * field.pixel_size
-
-    dis = pygame.display.set_mode((x_pixels, y_pixels))
-    pygame.display.set_caption('Snake game by Pythonist')
-
-    clock = pygame.time.Clock()
-
-    game_over = False
-
-    while not game_over:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                game_over = True
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_LEFT:
-                    sc.send_direction(sock, addr, my_id, snkpt.Direction.LEFT)
-                elif event.key == pygame.K_RIGHT:
-                    sc.send_direction(sock, addr, my_id, snkpt.Direction.RIGHT)
-                elif event.key == pygame.K_UP:
-                    sc.send_direction(sock, addr, my_id, snkpt.Direction.UP)
-                elif event.key == pygame.K_DOWN:
-                    sc.send_direction(sock, addr, my_id, snkpt.Direction.DOWN)
-
-        dis.fill(white)
-        draw_field(field, dis)
-
-        pygame.display.update()
-
-        clock.tick(10)
-
-    stop.set()
-    reciever_thread.join()
-    sock.close()
     pygame.quit()
     # quit()

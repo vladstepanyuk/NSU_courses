@@ -22,6 +22,8 @@ def draw_field(field, surface):
     draw_food(field.food, field.pixel_size, surface)
 
     for _, snake in field.snakes.items():
+        if not snake.is_alive:
+            continue
 
         for i in field.get_dots(snake):
             pygame.draw.rect(surface, snake.color, [i[0] * field.pixel_size, i[1] * field.pixel_size, field.pixel_size, field.pixel_size])

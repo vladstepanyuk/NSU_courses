@@ -10,12 +10,13 @@ directions_map_rev = {snkpt.Direction.UP: (0, -1), snkpt.Direction.DOWN: (0, 1),
 
 
 def send_direction(my_socket, addr, my_id, direction):
+    print(addr)
     send_msg = snkpt.GameMessage()
     send_msg.SteerMsg()
     send_msg.msg_seq = 0
     send_msg.sender_id = my_id
-    send_msg.receiver_id = 1
-    send_msg.steer.direction = direction
+    send_msg.receiver_id = 0
+    send_msg.steer.direction = directions_map[direction]  # direction
 
     my_socket.sendto(send_msg.SerializeToString(), addr)
 
@@ -26,57 +27,24 @@ class Snake:
         self.color = color
         self.body_shift = []
         self.direction = (1, 0)
+        self.is_alive = True
 
     def get_from_state(self, snake_state):
         self.head = (snake_state.points[0].x, snake_state.points[0].y)
         self.body_shift = [(snake_state.points[i].x, snake_state.points[i].y)
                            for i in range(1, len(snake_state.points))]
         self.direction = directions_map_rev[snake_state.head_direction]
+        self.is_alive = snake_state.state == snkpt.GameState.Snake.SnakeState.ALIVE
 
     def get_state(self):
         a = (self.head, *self.body_shift)
         snake_state = snkpt.GameState.Snake()
         snake_state.player_id = 0
         snake_state.points.extend([snkpt.GameState.Coord(x=x, y=y) for x, y in a])
-        snake_state.state = snkpt.GameState.Snake.SnakeState.ALIVE
+        snake_state.state = snkpt.GameState.Snake.SnakeState.ALIVE if self.is_alive \
+            else snkpt.GameState.Snake.SnakeState.ZOMBIE
         snake_state.head_direction = directions_map[self.direction]
         return snake_state
-
-    def turn_right(self):
-        pass
-
-    def turn_left(self):
-        pass
-
-    def turn_up(self):
-        pass
-
-    def turn_down(self):
-        pass
-
-
-class SnakeOnline(Snake):
-    def __init__(self, x, y, color, connection):
-        self.connection = connection
-        super().__init__(x, y, color)
-
-    def turn_right(self):
-        self.connection.send_steer_message(self.connection, snkpt.Direction.RIGHT)
-
-    def turn_left(self):
-        self.connection.send_steer_message(self.connection, snkpt.Direction.LEFT)
-
-    def turn_up(self):
-        self.connection.send_steer_message(self.connection, snkpt.Direction.UP)
-
-    def turn_down(self):
-        self.connection.send_steer_message(self.connection, snkpt.Direction.DOWN)
-
-
-class SnakeOffline(Snake):
-
-    def __init__(self, x, y, color):
-        super().__init__(x, y, color)
 
     def is_turn_possible(self, new_dir):
         x = self.direction[0] * new_dir[0]
@@ -102,9 +70,9 @@ class SnakeOffline(Snake):
             self.direction = (0, 1)
 
     def turn(self, direction):
-        dir = directions_map_rev[direction]
-        if self.is_turn_possible(dir):
-            self.direction = dir
+
+        if self.is_turn_possible(direction):
+            self.direction = direction
 
     def append_body(self):
         if self.body_shift:
@@ -120,6 +88,30 @@ class SnakeOffline(Snake):
             for i in range(1, len(self.body_shift)):
                 new_direction.append(self.body_shift[i - 1])
             self.body_shift = new_direction
+
+
+# class SnakeOnline(Snake):
+#     def __init__(self, x, y, color, connection):
+#         self.connection = connection
+#         super().__init__(x, y, color)
+#
+#     def turn_right(self):
+#         self.connection.send_steer_message(self.connection, snkpt.Direction.RIGHT)
+#
+#     def turn_left(self):
+#         self.connection.send_steer_message(self.connection, snkpt.Direction.LEFT)
+#
+#     def turn_up(self):
+#         self.connection.send_steer_message(self.connection, snkpt.Direction.UP)
+#
+#     def turn_down(self):
+#         self.connection.send_steer_message(self.connection, snkpt.Direction.DOWN)
+#
+#
+# class SnakeOffline(Snake):
+#
+#     def __init__(self, x, y, color):
+#         super().__init__(x, y, color)
 
 
 class Field:
@@ -141,9 +133,12 @@ class Field:
 
     def add_snake(self, snake):
         with self.mutex:
-            self.snakes[self.id_buffer] = snake
-            self.id_buffer += 1
-            return self.id_buffer - 1
+            if not self.snakes:
+                self.snakes[0] = snake
+                return 0
+            new_id = max(self.snakes.keys()) + 1
+            self.snakes[new_id] = snake
+            return new_id
 
     def calculate_collides(self):
 
@@ -152,6 +147,8 @@ class Field:
         to_delete = set()
 
         for index, snake in self.snakes.items():
+            if not snake.is_alive:
+                continue
 
             for i in self.get_dots(snake):
                 if i in dots:
@@ -168,20 +165,20 @@ class Field:
 
     def move(self):
         with self.mutex:
-
             i = 0
-
             for index, snake in self.snakes.items():
-                snake.move(self.x_pixels, self.y_pixels)
-                if snake.head in self.food:
-                    snake.append_body()
-                    self.food.remove(snake.head)
-                    i += 1
+                if snake.is_alive:
+                    snake.move(self.x_pixels, self.y_pixels)
+                    if snake.head in self.food:
+                        snake.append_body()
+                        self.food.remove(snake.head)
+                        i += 1
 
             to_delete = self.calculate_collides()
 
             for index in to_delete:
-                self.snakes.pop(index)
+                self.snakes[index].is_alive = False
+                # self.snakes.pop(index)
 
             for j in range(i):
                 self.spawn_food()
@@ -191,8 +188,9 @@ class Field:
         field = np.zeros((self.x_pixels, self.y_pixels))
 
         for _, snake in self.snakes.items():
-            for i, j in self.get_dots(snake):
-                field[i][j] = 1
+            if snake.is_alive:
+                for i, j in self.get_dots(snake):
+                    field[i][j] = 1
 
         for i in self.food:
             field[i[0]][i[1]] = 1

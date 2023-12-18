@@ -1,6 +1,6 @@
 # from game_object import *
 
-from game import server_game, client_game
+from game import server_game
 
 from draw_utils import *
 
@@ -15,15 +15,10 @@ server_port = 12345
 
 stop = False
 
-from concurrent.futures import ThreadPoolExecutor
-
-
-
-
-
 mode = input("Server or Client? (s/c): ")
 pygame.init()
 if mode == "s":
-    server_game(server_port)
+    server_game(True)
 elif mode == "c":
-    client_game("127.0.0.1", server_port)
+    server_game(False)
+    # client_game("127.0.0.1", server_port)
