@@ -1,9 +1,5 @@
 import numpy as np
 
-import torch
-from torch.autograd import Variable
-
-from torch import nn
 
 np.random.seed(100)
 
@@ -152,20 +148,6 @@ class LossFunction:
 
     def calc_gradient(self, y_true, y_pred):
         """gradient calculation"""
-
-
-class Metric:
-    def __init__(self):
-        """init"""
-
-    def calc_loss(self, y_true, y_pred):
-        """loss calculation"""
-
-
-class RMSE(Metric):
-    def calc_loss(self, y_true, y_pred):
-        err = y_true - y_pred
-        return np.sqrt(np.sum(err * err)) / len(err)
 
 
 class MSE(LossFunction):
