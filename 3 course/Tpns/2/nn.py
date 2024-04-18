@@ -1,7 +1,8 @@
 import numpy as np
 
-
 np.random.seed(100)
+
+eps = 1e-6
 
 
 class Function:
@@ -164,13 +165,13 @@ class MSE(LossFunction):
 class CrossEntropy(LossFunction):
 
     def calc_loss(self, y_true, y_pred):
-        hv = y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred)
+        hv = y_true * np.log(y_pred + eps) + (1 - y_true) * np.log(1 - y_pred + eps)
 
         return -(np.sum(hv)) / y_true.shape[0]
 
     def calc_gradient(self, y_true, y_pred):
         err = y_pred - y_true
-        return err / (y_pred * (1 - y_pred)) / y_true.shape[0]
+        return err / (y_pred * (1 - y_pred) * y_true.shape[0] + eps)
 
 
 class Optimizer:
