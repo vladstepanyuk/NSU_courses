@@ -9,6 +9,8 @@ class Function:
     def __init__(self):
         self.params = None
         self.grad = None
+        self.bias = None
+        self.bias_grad = None
         """initialize layer"""
 
     def forward(self, input: np.ndarray) -> np.ndarray:
@@ -48,7 +50,7 @@ class Linear(Function):
         return out
 
     def backward(self, out_gradient: np.ndarray):
-        self.grad = (out_gradient.T @ self.last_input)
+        self.grad += (out_gradient.T @ self.last_input)
 
         next_grad = out_gradient @ self.params
 
@@ -180,8 +182,43 @@ class Optimizer:
 
     def do_step_layer(self, layer: Function):
         layer.params -= self.lr * layer.grad
+        # print(np.sum(layer.grad * layer.grad))
+        if not (layer.bias is None):
+            layer.bias -= self.lr * layer.bias_grad
 
     def do_step(self, model: Model):
         for l in model.layers:
             if l.have_grad():
                 self.do_step_layer(l)
+
+
+class Softmax(Function):
+    def __init__(self):
+        super().__init__()
+        self.output_data = None
+
+    def forward(self, input_data: np.ndarray) -> np.ndarray:
+        exp_values = np.exp(input_data - np.max(input_data, axis=-1, keepdims=True))
+        probabilities = exp_values / np.sum(exp_values, axis=-1, keepdims=True)
+        self.output_data = probabilities
+        return self.output_data
+
+    def backward(self, d_output: np.ndarray, **kwargs) -> np.ndarray:
+        return d_output
+
+
+class CategoricalCrossEntropy(LossFunction):
+
+    def __init__(self, n_classes=2):
+        super().__init__()
+        self.n_classes = n_classes
+
+    def calc_loss(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        epsilon = 1e-15
+        clipped_y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
+        return -np.sum(y_true * np.log(clipped_y_pred)) / y_pred.shape[0]
+
+    def calc_gradient(self, y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
+        epsilon = 1e-15
+        clipped_y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
+        return -(y_true - clipped_y_pred) / y_pred.shape[0]

@@ -4,11 +4,11 @@ import torch
 from torch.autograd import Variable
 import numpy as np
 
-from nn import Linear
-from nn import Relu
-from nn import Sigmoid
+from layers.nn import Linear
+from layers.nn import Relu
+from layers.nn import Sigmoid
 
-from nn import CrossEntropy
+from layers.nn import CrossEntropy
 
 
 class TestNNLayers(unittest.TestCase):

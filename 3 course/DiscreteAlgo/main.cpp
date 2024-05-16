@@ -1,120 +1,260 @@
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include "graph_brutforce.h"
+#include <ranges>
+#include <span>
+#include <algorithm>
 
 #include "graph_equal.h"
 
-struct NamedGraph {
-  Matrix<int> graph_;
-  std::string name_;
+namespace rng = std::ranges;
+namespace vw = std::views;
+
+enum class VertexType {
+  A = 0,
+  B = 1,
+  C = 2,
+  D = 3,
 };
 
-std::vector<NamedGraph> LoadNamedGraphs(std::istream &is) {
-  auto rv = std::vector<NamedGraph> {};
-
-  while (is) {
-    auto new_graph = NamedGraph {};
-    std::getline(is, new_graph.name_);
-    if (new_graph.name_.empty()) {
+std::ostream &operator<<(std::ostream &ostream, const VertexType &type) {
+  switch (type) {
+    case VertexType::A:ostream << 'a';
       break;
-    }
-
-    auto graph_str = std::string {};
-    std::getline(is, graph_str);
-    auto graph_size = static_cast<size_t>(atoi(graph_str.c_str()));
-    new_graph.graph_.resize(graph_size);
-
-    for (int i = 0; i < graph_size; ++i) {
-      auto line = std::string {};
-      std::getline(is, line);
-      auto ss = std::stringstream(line);
-
-      for (int j = 0; j < graph_size; ++j) {
-        size_t num;
-        ss >> num;
-        new_graph.graph_[i].emplace_back(num);
-      }
-    }
-
-    rv.emplace_back(std::move(new_graph));
+    case VertexType::B:ostream << 'b';
+      break;
+    case VertexType::C:ostream << 'c';
+      break;
+    case VertexType::D:ostream << 'd';
+      break;
   }
-
-  return rv;
+  return ostream;
 }
 
-Matrix<int> DeleteIEdge(const Matrix<int> &graph, size_t i) {
-  auto hg = Matrix<int>(graph.size() - 1, std::vector<int>(graph.size() - 1, 0));
+class Potential {
+ public:
+  Potential() = default;
 
-  for (int j_g = 0, j_hg = 0; j_g < hg.size() + 1; ++j_g) {
-    if (j_g == i) {
-      continue;
-    }
-
-    for (int k_g = 0, k_hg = 0; k_g < hg.size() + 1; ++k_g) {
-      if (k_g == i) {
-        continue;
-      }
-
-      hg[j_hg][k_hg] = graph[j_g][k_g];
-      k_hg++;
-    }
-
-    ++j_hg;
+  void ResetIn() {
+    in_--;
   }
 
-  return hg;
-}
+  void ResetOut() {
+    out_--;
+  }
 
-std::vector<std::string> GetStringsEquiv(const Matrix<int> &graph_to_process,
-                                         const std::vector<NamedGraph> &graphs_to_compare) {
-  auto rv = std::vector<std::string> {};
+  void AddIn() {
+    in_++;
+  }
 
-  for (int i = 0; i < graph_to_process.size(); ++i) {
-    auto hg = DeleteIEdge(graph_to_process, i);
+  void AddOut() {
+    out_++;
+  }
 
-    for (auto &[graph, name] : graphs_to_compare) {
-      if (IsSameGraph(hg, graph)) {
-        rv.emplace_back(name);
+  void ResetTypesIter() {
+    possible_types_ = std::nullopt;
+    posible_types_i_ = 0;
+  };
+
+  std::optional<VertexType> GetType() {
+    if (!possible_types_) {
+      possible_types_ = GetPossibleTypes();
+    }
+    if (posible_types_i_ >= possible_types_->size()) {
+      return std::nullopt;
+    }
+
+    auto t = possible_types_.value()[posible_types_i_++];
+
+    return t;
+  }
+
+  [[nodiscard]] std::vector<VertexType> GetPossibleTypes() const {
+
+    if (in_ == 2 && out_ == 0) {
+      return {VertexType::A};
+    }
+
+    if (in_ == 1 && out_ == 1) {
+      return {VertexType::B, VertexType::C};
+    }
+
+    if (in_ == 0 && out_ == 1) {
+      return {VertexType::B, VertexType::C, VertexType::D};
+    }
+
+    if (in_ == 1 && out_ == 0) {
+      return {VertexType::A, VertexType::C, VertexType::B};
+    }
+
+    if (in_ == 0 && out_ == 2) {
+      return {VertexType::D};
+    }
+
+    return {VertexType::A, VertexType::B, VertexType::C, VertexType::D};
+  }
+
+  [[nodiscard]] bool PotentialError(VertexType t) const {
+    auto in = in_;
+    auto out = out_;
+
+    switch (t) {
+      case VertexType::A:out += 2;
         break;
-      }
+      case VertexType::D:in += 2;
+        break;
+      default:out++;
+        in++;
+    }
+
+    return in > 2 || out > 2;
+  }
+
+  [[nodiscard]] bool PotentialError() const {
+
+    return in_ > 2 || out_ > 2;
+  }
+
+ private:
+  std::vector<size_t> num_blockers_ = {0, 0, 0, 0};
+
+  std::optional<std::vector<VertexType>> possible_types_;
+  size_t posible_types_i_ = 0;
+  size_t in_ = 0;
+  size_t out_ = 0;
+};
+
+class EuilerOrientationGenerator {
+ public:
+  EuilerOrientationGenerator(size_t n) : n_(n) {
+    current_ = std::vector<VertexType>(n_, VertexType::A);
+    potentials_ = std::vector<Potential>(n_, Potential());
+
+    for (auto i : vw::iota(0ul, n_)) {
+      potentials_[i].GetType();
+      potentials_[(i + 1) % n_].AddIn();
+      potentials_[(i + 3) % n_].AddIn();
     }
 
   }
 
-  return rv;
-}
-
-std::vector<std::pair<std::string,
-                      std::vector<std::string>>> BrutForceWithDeleteVertex(const std::vector<NamedGraph> &graphs_to_delete,
-                                                                           const std::vector<NamedGraph> &graphs_to_compare) {
-  auto rv = std::vector<std::pair<std::string, std::vector<std::string>>> {};
-
-  for (auto &[graph1, name1] : graphs_to_delete) {
-    auto strings = GetStringsEquiv(graph1, graphs_to_compare);
-
-    rv.emplace_back(name1, strings);
+  [[nodiscard]] auto GetView() const {
+    return vw::all(current_);
   }
 
-  return rv;
-}
+  bool Generate() {
+    if (done_) {
+      return false;
+    }
+
+    Brutforce(n_ - 1);
+
+    return !done_;
+  }
+
+ private:
+
+  void Brutforce(size_t i) {
+
+    ResetConstraints(i);
+    auto t_o = potentials_[i].GetType();
+
+    if (!t_o && i == 0) {
+      done_ = true;
+      return;
+    }
+
+    auto was_iter = false;
+
+    while (!t_o && !done_) {
+
+      if (was_iter) {
+        ResetConstraints(i);
+      }
+      potentials_[i].ResetTypesIter();
+
+      Brutforce(i - 1);
+      t_o = potentials_[i].GetType();
+      was_iter = true;
+
+    }
+    if (done_) {
+      return;
+    }
+
+    auto t = t_o.value();
+
+    current_[i] = t;
+    SetConstraints(i);
+    if (CheckError(i)) {
+      Brutforce(i);
+    }
+  }
+
+  bool CheckError(size_t i) {
+    bool error1 = i + 1 >= n_ ?
+                  potentials_[(i + 1) % n_].PotentialError(current_[(i + 1) % n_]) :
+                  potentials_[(i + 1) % n_].PotentialError();
+    bool error2 = i + 3 >= n_ ?
+                  potentials_[(i + 3) % n_].PotentialError(current_[(i + 3) % n_]) :
+                  potentials_[(i + 3) % n_].PotentialError();;
+
+    return error1 || error2;
+  }
+
+  void ResetConstraints(size_t i) {
+    if (current_[i] == VertexType::A || current_[i] == VertexType::B) {
+      potentials_[(i + 1) % n_].ResetIn();
+    } else {
+      potentials_[(i + 1) % n_].ResetOut();
+    }
+
+    if (current_[i] == VertexType::A || current_[i] == VertexType::C) {
+      potentials_[(i + 3) % n_].ResetIn();
+    } else {
+      potentials_[(i + 3) % n_].ResetOut();
+    }
+  }
+
+  void SetConstraints(size_t i) {
+    if (current_[i] == VertexType::A || current_[i] == VertexType::B) {
+      potentials_[(i + 1) % n_].AddIn();
+    } else {
+      potentials_[(i + 1) % n_].AddOut();
+    }
+
+    if (current_[i] == VertexType::A || current_[i] == VertexType::C) {
+      potentials_[(i + 3) % n_].AddIn();
+    } else {
+      potentials_[(i + 3) % n_].AddOut();
+    }
+
+  }
+
+ private:
+  std::vector<Potential> potentials_;
+  std::vector<VertexType> current_;
+  bool done_ = false;
+
+  size_t n_;
+};
 
 int main(int argc, char **argv) {
-  auto t4f = std::ifstream("../all_4_edges_tournaments.txt");
-  auto graphs4 = LoadNamedGraphs(t4f);
+  auto generator = EuilerOrientationGenerator(8);
+  auto res_view = generator.GetView();
+  auto i = 0;
 
-  auto t5f = std::ifstream("../all_5_edges_tournaments.txt");
-  auto graphs5 = LoadNamedGraphs(t5f);
+  do {
 
-  auto res = BrutForceWithDeleteVertex(graphs5, graphs4);
+    rng::for_each(res_view, [](VertexType x) {
+      std::cout << x;
+    });
+    std::cout << std::endl;
+    ++i;
 
-  for (auto &[name, strings] : res) {
-    std::cout << name << ":\n";
-    for (auto &str : strings) {
-      std::cout << str << ", ";
-    }
-    std::cout << '\n';
-  }
+  } while (generator.Generate());
 
-
+  std::cout << i << std::endl;
 }
 
